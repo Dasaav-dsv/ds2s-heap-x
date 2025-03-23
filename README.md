@@ -7,6 +7,7 @@ Small DS2S 1.03 utility that allows for configuring heap sizes for modding purpo
 It should be loaded early, before the game is able to initialize its heap allocators.
 
 For legacy modengine compatibility, it can be loaded as a standalone dinput8 proxy (by renaming "ds2s_heap_x.dll" into "dinput8.dll") or chainloaded:
+
 *modengine.ini*
 ```
 [misc]
