@@ -102,12 +102,12 @@ fn direct_input8_create_proxy(
             _,
             fn(HINSTANCE, u32, *const GUID, *mut *mut c_void, *mut IUnknown) -> HRESULT,
         >(
-            GetProcAddress(dinput8, windows::core::s!("DirectInput8Create")).ok_or(
+            GetProcAddress(dinput8, windows::core::s!("DirectInput8Create")).ok_or_else(|| {
                 WindowsError::new(
                     GetLastError().to_hresult(),
                     "GetProcAddress did not return a valid DirectInput8Create address",
-                ),
-            )?,
+                )
+            })?,
         )
     };
 
