@@ -64,7 +64,7 @@ fn get_file_version() -> WindowsResult<Version> {
         }
     }
 
-    if resource_start.addr() + std::mem::size_of::<VS_FIXEDFILEINFO>() >= resource_end.addr() {
+    if resource_start.addr() + std::mem::size_of::<VS_FIXEDFILEINFO>() > resource_end.addr() {
         return Err(WindowsError::new(
             ERROR_BAD_LENGTH.to_hresult(),
             "invalid version resource length",
