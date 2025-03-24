@@ -90,10 +90,12 @@ fn direct_input8_create_proxy(
     out: *mut *mut c_void,
     unkouter: *mut IUnknown,
 ) -> WindowsResult<()> {
-    let dinput8_path = get_dinput8_path().ok_or(WindowsError::new(
-        ERROR_FILE_NOT_FOUND.to_hresult(),
-        "failed to get dinput8.dll path",
-    ))?;
+    let dinput8_path = get_dinput8_path().ok_or_else(|| {
+        WindowsError::new(
+            ERROR_FILE_NOT_FOUND.to_hresult(),
+            "failed to get dinput8.dll path",
+        )
+    })?;
 
     let dinput8 = unsafe { LoadLibraryW(&HSTRING::from(dinput8_path))? };
 
