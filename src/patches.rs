@@ -74,22 +74,10 @@ pub fn place_all(config: &Config) -> WindowsResult<()> {
     patch_helper.set_global_heap_u32(0xaef595 + 3)?;
 
     // Morpheme fixed size vector expansion:
-    const MORPHEME_DATA_FIXED_COUNT: u32 = 0x3000;
-    const MORPHEME_DATA_ELEMENT_SIZE: u32 = 0x28;
-    const MORPHEME_DATA_HEADER_SIZE: u32 = 0x28;
+    patch_helper.patch_morpheme_limit()?;
 
-    let morpheme_data_new_count = MORPHEME_DATA_FIXED_COUNT
-        .saturating_mul(config.heap_size_multiplier.max(1))
-        .saturating_mul(config.heap_sizes.morpheme.max(1));
-
-    patch_helper.set_u32(0x5f4f38 + 2, morpheme_data_new_count)?;
-
-    let morpheme_data_total_size = MORPHEME_DATA_ELEMENT_SIZE
-        .saturating_mul(morpheme_data_new_count)
-        .saturating_add(MORPHEME_DATA_HEADER_SIZE);
-
-    patch_helper.set_u32(0x5f4ef2 + 1, morpheme_data_total_size)?;
-    patch_helper.set_u32(0x5f4f43 + 5, morpheme_data_total_size)?;
+    // Patch DLFixedVector containers limited to 32 character resource slots:
+    patch_helper.patch_character_resource_limit()?;
 
     Ok(())
 }
@@ -160,6 +148,166 @@ impl<'a> PatchHelper<'a> {
 
             ptr.write_unaligned(with_mul.max(with_add));
         }
+
+        Ok(())
+    }
+
+    fn patch_morpheme_limit(&mut self) -> WindowsResult<()> {
+        const MORPHEME_DATA_FIXED_COUNT: u32 = 0x3000;
+        const MORPHEME_DATA_ELEMENT_SIZE: u32 = 0x28;
+        const MORPHEME_DATA_HEADER_SIZE: u32 = 0x28;
+
+        let morpheme_data_new_count = MORPHEME_DATA_FIXED_COUNT
+            .saturating_mul(self.config.heap_size_multiplier.max(1))
+            .saturating_mul(self.config.heap_sizes.morpheme.max(1));
+
+        self.set_u32(0x5f4f38 + 2, morpheme_data_new_count)?;
+
+        let morpheme_data_total_size = MORPHEME_DATA_ELEMENT_SIZE
+            .saturating_mul(morpheme_data_new_count)
+            .saturating_add(MORPHEME_DATA_HEADER_SIZE);
+
+        self.set_u32(0x5f4ef2 + 1, morpheme_data_total_size)?;
+        self.set_u32(0x5f4f43 + 5, morpheme_data_total_size)?;
+
+        Ok(())
+    }
+
+    fn patch_character_resource_limit(&mut self) -> WindowsResult<()> {
+        if !self.config.patch_character_limit {
+            return Ok(());
+        }
+
+        /*
+           Patching the code accessing the struct below to increase how
+           many character types can be loaded by the game at once:
+
+           struct ResObjectHolder {
+               DLAllocator* allocator;
+               DLFixedVector<ChrResModelObject*, 32> model_res_objects;
+               DLFixedVector<ChrResMorphemeObject*, 32> morpheme_res_objects;
+               DLFixedVector<ChrResSoundObject*, 32> sound_res_objects;
+               DLFixedVector<ChrResTimeActObject*, 32> tae_res_objects;
+           };
+
+           The default limit is 32. After more than 32 characters are loaded, no new character
+           resources can be inserted, and character loading will never finish. This leads to
+           missing enemies and infinite loading screens.
+
+           The layout of a DLFixedVector is:
+
+           template <typename T, size_t Capacity>
+           struct DLFixedVector {
+               std::byte buffer[sizeof(T) * Capacity + alignof(T)];
+               size_t size;
+           };
+
+           Note that the elements inside the buffer are manually aligned, so extra space is needed
+           (at most the alignment of T).
+
+           Any code accessing the fixed vector is compiled with the capacity and overall structure
+           size, so *everything* in accessing code needs to be patched to increase the capacity.
+        */
+
+        const DLALLOCATOR_BASE_SIZE: u32 = 8;
+        const DLFIXEDVECTOR_ELEMENT_SIZE: u32 = 8;
+        const DLFIXEDVECTOR_BASE_CAPACITY: u32 = 32;
+
+        // Patch the capacity from 32 to 1024, should realistically be enough:
+        const DLFIXEDVECTOR_NEW_CAPACITY: u32 = DLFIXEDVECTOR_BASE_CAPACITY * 32;
+
+        // sizeof(T) * Capacity + alignof(T) + sizeof(size_t)
+        const DLFIXEDVECTOR_NEW_SIZE: u32 =
+            DLFIXEDVECTOR_ELEMENT_SIZE * DLFIXEDVECTOR_NEW_CAPACITY + 8 + 8;
+
+        // Total patched structure size
+        const RES_OBJECT_HOLDER_SIZE: u32 = DLALLOCATOR_BASE_SIZE + DLFIXEDVECTOR_NEW_SIZE * 4;
+
+        // Offsets of each fixed vector in `ResObjectHolder`
+        const DLFIXEDVECTOR_0_OFFSET: u32 = DLALLOCATOR_BASE_SIZE;
+        const DLFIXEDVECTOR_1_OFFSET: u32 = DLFIXEDVECTOR_0_OFFSET + DLFIXEDVECTOR_NEW_SIZE;
+        const DLFIXEDVECTOR_2_OFFSET: u32 = DLFIXEDVECTOR_1_OFFSET + DLFIXEDVECTOR_NEW_SIZE;
+        const DLFIXEDVECTOR_3_OFFSET: u32 = DLFIXEDVECTOR_2_OFFSET + DLFIXEDVECTOR_NEW_SIZE;
+
+        // Offset of `size` field in `DLFixedVector<T, N>`
+        const DLFIXEDVECTOR_SIZE_OFFSET: u32 = DLFIXEDVECTOR_NEW_SIZE * 1 - 8;
+
+        // Offsets of each fixed vector's `size` field in `ResObjectHolder`
+        const DLFIXEDVECTOR_0_SIZE_OFFSET: u32 = DLALLOCATOR_BASE_SIZE + DLFIXEDVECTOR_SIZE_OFFSET;
+        const DLFIXEDVECTOR_1_SIZE_OFFSET: u32 =
+            DLFIXEDVECTOR_0_SIZE_OFFSET + DLFIXEDVECTOR_NEW_SIZE;
+        const DLFIXEDVECTOR_2_SIZE_OFFSET: u32 =
+            DLFIXEDVECTOR_1_SIZE_OFFSET + DLFIXEDVECTOR_NEW_SIZE;
+        const DLFIXEDVECTOR_3_SIZE_OFFSET: u32 =
+            DLFIXEDVECTOR_2_SIZE_OFFSET + DLFIXEDVECTOR_NEW_SIZE;
+
+        // DarkSoulsII.exe+0x165c80:
+        self.set_u32(0x165c85 + 3, DLFIXEDVECTOR_0_SIZE_OFFSET)?;
+        self.set_u32(0x165c8c + 3, DLFIXEDVECTOR_1_SIZE_OFFSET)?;
+        self.set_u32(0x165c93 + 3, DLFIXEDVECTOR_2_SIZE_OFFSET)?;
+        self.set_u32(0x165c9a + 3, DLFIXEDVECTOR_3_SIZE_OFFSET)?;
+
+        // DarkSoulsII.exe+0x166370:
+        self.set_u32(0x1663ad + 3, DLFIXEDVECTOR_NEW_SIZE)?;
+        self.set_u32(0x1663b7 + 3, DLFIXEDVECTOR_SIZE_OFFSET)?;
+        self.set_u32(0x166402 + 3, DLFIXEDVECTOR_SIZE_OFFSET)?;
+        self.set_u32(0x166419 + 3, DLFIXEDVECTOR_SIZE_OFFSET)?;
+        self.set_u32(0x166470 + 3, DLFIXEDVECTOR_SIZE_OFFSET)?;
+        self.set_u32(0x166492 + 3, DLFIXEDVECTOR_SIZE_OFFSET)?;
+        self.set_u32(0x1664b8 + 3, DLFIXEDVECTOR_NEW_SIZE)?;
+        self.set_u32(0x1664c3 + 3, DLFIXEDVECTOR_NEW_SIZE)?;
+
+        // DarkSoulsII.exe+0x166560:
+        self.set_u32(0x166567 + 3, DLFIXEDVECTOR_SIZE_OFFSET)?;
+
+        // DarkSoulsII.exe+0x1665c0:
+        self.set_u32(0x1665c0 + 3, DLFIXEDVECTOR_1_OFFSET)?;
+        self.set_u32(0x1665ca + 3, DLFIXEDVECTOR_SIZE_OFFSET)?;
+
+        // DarkSoulsII.exe+0x166620:
+        self.set_u32(0x166620 + 3, DLFIXEDVECTOR_1_OFFSET)?;
+        self.set_u32(0x16662a + 3, DLFIXEDVECTOR_SIZE_OFFSET)?;
+
+        // DarkSoulsII.exe+0x166680:
+        self.set_u32(0x166687 + 3, DLFIXEDVECTOR_SIZE_OFFSET)?;
+
+        // DarkSoulsII.exe+0x1666e0:
+        self.set_u32(0x1666e0 + 3, DLFIXEDVECTOR_3_OFFSET)?;
+        self.set_u32(0x1666ea + 3, DLFIXEDVECTOR_SIZE_OFFSET)?;
+
+        // DarkSoulsII.exe+0x1671d0:
+        self.set_u32(0x167279 + 3, DLFIXEDVECTOR_SIZE_OFFSET)?;
+        self.set_u32(0x167289 + 3, DLFIXEDVECTOR_NEW_SIZE)?;
+        self.set_u32(0x1673eb + 3, DLFIXEDVECTOR_SIZE_OFFSET)?;
+        self.set_u32(0x167432 + 3, DLFIXEDVECTOR_NEW_SIZE)?;
+        self.set_u32(0x1674c0 + 3, DLFIXEDVECTOR_SIZE_OFFSET)?;
+        self.set_u32(0x1674d0 + 3, DLFIXEDVECTOR_NEW_SIZE)?;
+        self.set_u32(0x167540 + 3, DLFIXEDVECTOR_SIZE_OFFSET)?;
+        self.set_u32(0x16755e + 3, DLFIXEDVECTOR_SIZE_OFFSET)?;
+        self.set_u32(0x167585 + 3, DLFIXEDVECTOR_SIZE_OFFSET)?;
+        self.set_u32(0x167592 + 3, DLFIXEDVECTOR_SIZE_OFFSET)?;
+        self.set_u32(0x1675ac + 3, DLFIXEDVECTOR_NEW_SIZE)?;
+
+        // DarkSoulsII.exe+0x167660:
+        self.set_u32(0x16766e + 3, DLFIXEDVECTOR_NEW_SIZE)?;
+        self.set_u32(0x16767b + 3, DLFIXEDVECTOR_SIZE_OFFSET)?;
+
+        // DarkSoulsII.exe+0x167780:
+        self.set_u32(0x1677a4 + 3, DLFIXEDVECTOR_NEW_SIZE)?;
+        self.set_u32(0x1677b1 + 3, DLFIXEDVECTOR_SIZE_OFFSET)?;
+        self.set_u32(0x1677e5 + 4, DLFIXEDVECTOR_NEW_SIZE)?;
+        self.set_u32(0x16793d + 3, DLFIXEDVECTOR_SIZE_OFFSET)?;
+        self.set_u32(0x167951 + 3, DLFIXEDVECTOR_SIZE_OFFSET)?;
+        // Neutralize size overflow check exceptions
+        self.set_u32(0x1677ee + 2, 0)?;
+        self.set_u32(0x167947, 0xF9909090)?;
+
+        // DarkSoulsII.exe+0x1679c0:
+        self.set_u32(0x1679ca + 3, DLFIXEDVECTOR_NEW_SIZE)?;
+        self.set_u32(0x1679d7 + 3, DLFIXEDVECTOR_SIZE_OFFSET)?;
+
+        // DarkSoulsII.exe+0x350e00:
+        self.set_u32(0x350e16 + 1, RES_OBJECT_HOLDER_SIZE)?;
 
         Ok(())
     }

@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct Config {
+    pub patch_character_limit: bool,
     pub heap_size_multiplier: u32,
     pub heap_sizes: HeapSizeConfig,
 }
@@ -36,6 +37,7 @@ pub struct HeapSizeConfig {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            patch_character_limit: true,
             heap_size_multiplier: 2,
             heap_sizes: Default::default(),
         }
