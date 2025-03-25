@@ -114,10 +114,6 @@ impl<'a> PatchHelper<'a> {
     fn mul_u32(&mut self, offset: usize, val: u32, add_to_global_heap: bool) -> WindowsResult<()> {
         Self::set_rwe_memory_u32(self.base_addr + offset)?;
 
-        let val = val
-            .max(1)
-            .saturating_mul(self.config.heap_size_multiplier.max(1));
-
         unsafe {
             let ptr = (self.base_addr + offset) as *mut u32;
 
@@ -143,7 +139,7 @@ impl<'a> PatchHelper<'a> {
 
             let base = ptr.read_unaligned();
 
-            let with_mul = base.saturating_mul(self.config.heap_size_multiplier.max(1));
+            let with_mul = base.saturating_mul(self.config.heap_sizes.global);
             let with_add = base.saturating_add(self.global_heap_bonus);
 
             ptr.write_unaligned(with_mul.max(with_add));
@@ -157,9 +153,8 @@ impl<'a> PatchHelper<'a> {
         const MORPHEME_DATA_ELEMENT_SIZE: u32 = 0x28;
         const MORPHEME_DATA_HEADER_SIZE: u32 = 0x28;
 
-        let morpheme_data_new_count = MORPHEME_DATA_FIXED_COUNT
-            .saturating_mul(self.config.heap_size_multiplier.max(1))
-            .saturating_mul(self.config.heap_sizes.morpheme.max(1));
+        let morpheme_data_new_count =
+            MORPHEME_DATA_FIXED_COUNT.saturating_mul(self.config.heap_sizes.morpheme);
 
         self.set_u32(0x5f4f38 + 2, morpheme_data_new_count)?;
 

@@ -17,6 +17,7 @@ pub struct HeapSizeConfig {
     pub debug: u32,
     pub facegen: u32,
     pub file_data: u32,
+    pub global: u32,
     pub graphics: u32,
     pub gui: u32,
     pub havok: u32,
@@ -50,6 +51,7 @@ impl Default for HeapSizeConfig {
             debug: 1,
             facegen: 1,
             file_data: 2,
+            global: 1,
             graphics: 1,
             gui: 1,
             havok: 4,
@@ -77,6 +79,10 @@ pub enum ConfigError {
 }
 
 impl Config {
+    pub fn read_or_create_default(dll_path: &Path) -> Self {
+        Self::read_or_create(dll_path).normalize()
+    }
+
     fn read(config_path: &Path) -> Result<Self, ConfigError> {
         let raw_config = match fs::read_to_string(config_path) {
             Ok(contents) => contents,
@@ -86,10 +92,13 @@ impl Config {
             },
         };
 
-        toml::from_str(&raw_config).map_err(|_| ConfigError::InvalidToml)
+        match toml::from_str::<Self>(&raw_config) {
+            Ok(config) => Ok(config.normalize()),
+            Err(_) => Err(ConfigError::InvalidToml),
+        }
     }
 
-    pub fn read_or_create_default(dll_path: &Path) -> Self {
+    pub fn read_or_create(dll_path: &Path) -> Self {
         let Some(config_path) = dll_dir_from_path(dll_path).map(|mut path| {
             path.push("ds2s_heap_x.toml");
             path
@@ -111,6 +120,112 @@ impl Config {
                 default
             }
             Err(IoError) => Self::default(),
+        }
+    }
+
+    fn normalize(self) -> Self {
+        let heap_size_multiplier = self.heap_size_multiplier.max(1);
+
+        Self {
+            patch_character_limit: self.patch_character_limit,
+            heap_size_multiplier: 1,
+            heap_sizes: HeapSizeConfig {
+                debug: self
+                    .heap_sizes
+                    .debug
+                    .max(1)
+                    .saturating_mul(heap_size_multiplier),
+                facegen: self
+                    .heap_sizes
+                    .facegen
+                    .max(1)
+                    .saturating_mul(heap_size_multiplier),
+                file_data: self
+                    .heap_sizes
+                    .file_data
+                    .max(1)
+                    .saturating_mul(heap_size_multiplier),
+                global: self
+                    .heap_sizes
+                    .global
+                    .max(1)
+                    .saturating_mul(heap_size_multiplier),
+                graphics: self
+                    .heap_sizes
+                    .graphics
+                    .max(1)
+                    .saturating_mul(heap_size_multiplier),
+                gui: self
+                    .heap_sizes
+                    .gui
+                    .max(1)
+                    .saturating_mul(heap_size_multiplier),
+                havok: self
+                    .heap_sizes
+                    .havok
+                    .max(1)
+                    .saturating_mul(heap_size_multiplier),
+                menu: self
+                    .heap_sizes
+                    .menu
+                    .max(1)
+                    .saturating_mul(heap_size_multiplier),
+                morpheme: self
+                    .heap_sizes
+                    .morpheme
+                    .max(1)
+                    .saturating_mul(heap_size_multiplier),
+                network: self
+                    .heap_sizes
+                    .network
+                    .max(1)
+                    .saturating_mul(heap_size_multiplier),
+                player: self
+                    .heap_sizes
+                    .player
+                    .max(1)
+                    .saturating_mul(heap_size_multiplier),
+                regulation: self
+                    .heap_sizes
+                    .regulation
+                    .max(1)
+                    .saturating_mul(heap_size_multiplier),
+                scene_graph: self
+                    .heap_sizes
+                    .scene_graph
+                    .max(1)
+                    .saturating_mul(heap_size_multiplier),
+                sfx: self
+                    .heap_sizes
+                    .sfx
+                    .max(1)
+                    .saturating_mul(heap_size_multiplier),
+                sound: self
+                    .heap_sizes
+                    .sound
+                    .max(1)
+                    .saturating_mul(heap_size_multiplier),
+                string_data: self
+                    .heap_sizes
+                    .string_data
+                    .max(1)
+                    .saturating_mul(heap_size_multiplier),
+                system: self
+                    .heap_sizes
+                    .system
+                    .max(1)
+                    .saturating_mul(heap_size_multiplier),
+                temp: self
+                    .heap_sizes
+                    .temp
+                    .max(1)
+                    .saturating_mul(heap_size_multiplier),
+                temp2: self
+                    .heap_sizes
+                    .temp2
+                    .max(1)
+                    .saturating_mul(heap_size_multiplier),
+            },
         }
     }
 }
