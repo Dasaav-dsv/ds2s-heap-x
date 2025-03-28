@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize)]
 pub struct Config {
     pub patch_character_limit: bool,
+    pub patch_soundbank_limit: bool,
     pub heap_size_multiplier: u32,
     pub heap_sizes: HeapSizeConfig,
 }
@@ -63,7 +64,7 @@ impl Default for HeapSizeConfig {
             regulation: 2,
             scene_graph: 1,
             sfx: 4,
-            sound: 2,
+            sound: 3,
             string_data: 2,
             system: 2,
             temp: 1,
@@ -128,7 +129,6 @@ impl Config {
         let heap_size_multiplier = self.heap_size_multiplier.max(1);
 
         Self {
-            patch_character_limit: self.patch_character_limit,
             heap_size_multiplier: 1,
             heap_sizes: HeapSizeConfig {
                 debug: self
