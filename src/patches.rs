@@ -79,6 +79,9 @@ pub fn place_all(config: &Config) -> WindowsResult<()> {
     // Patch DLFixedVector containers limited to 32 character resource slots:
     patch_helper.patch_character_resource_limit()?;
 
+    // Patch DLFixedVector container limited to 48 FMod soundbanks:
+    patch_helper.patch_soundbank_limit()?;
+
     Ok(())
 }
 
@@ -225,7 +228,7 @@ impl<'a> PatchHelper<'a> {
         const DLFIXEDVECTOR_3_OFFSET: u32 = DLFIXEDVECTOR_2_OFFSET + DLFIXEDVECTOR_NEW_SIZE;
 
         // Offset of `size` field in `DLFixedVector<T, N>`
-        const DLFIXEDVECTOR_SIZE_OFFSET: u32 = DLFIXEDVECTOR_NEW_SIZE * 1 - 8;
+        const DLFIXEDVECTOR_SIZE_OFFSET: u32 = DLFIXEDVECTOR_NEW_SIZE - 8;
 
         // Offsets of each fixed vector's `size` field in `ResObjectHolder`
         const DLFIXEDVECTOR_0_SIZE_OFFSET: u32 = DLALLOCATOR_BASE_SIZE + DLFIXEDVECTOR_SIZE_OFFSET;
@@ -303,6 +306,71 @@ impl<'a> PatchHelper<'a> {
 
         // DarkSoulsII.exe+0x350e00:
         self.set_u32(0x350e16 + 1, RES_OBJECT_HOLDER_SIZE)?;
+
+        Ok(())
+    }
+
+    fn patch_soundbank_limit(&mut self) -> WindowsResult<()> {
+        if !self.config.patch_soundbank_limit {
+            return Ok(());
+        }
+
+        /*
+            Look above at `PatchHelper::patch_character_resource_limit` for detailed layout information.
+
+            struct RegisteredBankHolder {
+               uint32_t total_count;
+               DLFixedVector<RegisteredBank, 48> registered_banks;
+            };
+
+            sizeof(RegisteredBank) == 632, alignof(RegisteredBank) == 8
+        */
+
+        const DLFIXEDVECTOR_ELEMENT_SIZE: u32 = 632;
+
+        // More than the total number of all soundbanks in the /sound directory
+        const DLFIXEDVECTOR_NEW_CAPACITY: u32 = 513;
+
+        // sizeof(T) * Capacity + alignof(T) + sizeof(size_t)
+        const DLFIXEDVECTOR_NEW_SIZE: u32 =
+            DLFIXEDVECTOR_ELEMENT_SIZE * DLFIXEDVECTOR_NEW_CAPACITY + 8 + 8;
+
+        // Total patched structure size
+        const REGISTERED_BANK_HOLDER_SIZE: u32 = 8 + DLFIXEDVECTOR_NEW_SIZE;
+
+        // Offset of `size` field in `DLFixedVector<T, N>`
+        const DLFIXEDVECTOR_SIZE_OFFSET: u32 = DLFIXEDVECTOR_NEW_SIZE - 8;
+
+        // Offsets of each fixed vector's `size` field in `ResObjectHolder`
+        const DLFIXEDVECTOR_0_SIZE_OFFSET: u32 = 8 + DLFIXEDVECTOR_SIZE_OFFSET;
+
+        // DarkSoulsII.exe+0xb074d0:
+        self.set_u32(0xb07741 + 1, REGISTERED_BANK_HOLDER_SIZE)?;
+
+        // DarkSoulsII.exe+0xb57df0:
+        self.set_u32(0xb57dfa + 3, DLFIXEDVECTOR_0_SIZE_OFFSET)?;
+
+        // DarkSoulsII.exe+0xb57d70:
+        self.set_u32(0xb57d74 + 3, DLFIXEDVECTOR_0_SIZE_OFFSET)?;
+
+        // DarkSoulsII.exe+0xb580f0:
+        self.set_u32(0xb58113 + 3, DLFIXEDVECTOR_SIZE_OFFSET)?;
+
+        // DarkSoulsII.exe+0xb58240:
+        self.set_u32(0xb5825d, 0xF9909090)?;
+        self.set_u32(0xb5825d + 4, 0x90909090)?;
+
+        // DarkSoulsII.exe+0xb583a0:
+        self.set_u32(0xb583c6 + 3, DLFIXEDVECTOR_SIZE_OFFSET)?;
+        self.set_u32(0xb58521 + 3, DLFIXEDVECTOR_SIZE_OFFSET)?;
+        self.set_u32(0xb58549 + 3, DLFIXEDVECTOR_SIZE_OFFSET)?;
+        self.set_u32(0xb58575 + 3, DLFIXEDVECTOR_SIZE_OFFSET)?;
+        self.set_u32(0xb5857c + 3, DLFIXEDVECTOR_0_SIZE_OFFSET)?;
+
+        // DarkSoulsII.exe+0xb58650:
+        self.set_u32(0xb58654 + 3, DLFIXEDVECTOR_SIZE_OFFSET)?;
+        self.set_u32(0xb5865e, 0xF9909090)?;
+        self.set_u32(0xb58667 + 3, DLFIXEDVECTOR_SIZE_OFFSET)?;
 
         Ok(())
     }
