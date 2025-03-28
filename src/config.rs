@@ -39,6 +39,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             patch_character_limit: true,
+            patch_soundbank_limit: true,
             heap_size_multiplier: 2,
             heap_sizes: Default::default(),
         }
@@ -226,6 +227,7 @@ impl Config {
                     .max(1)
                     .saturating_mul(heap_size_multiplier),
             },
+            ..self
         }
     }
 }
