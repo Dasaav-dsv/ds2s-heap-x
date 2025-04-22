@@ -82,6 +82,9 @@ pub fn place_all(config: &Config) -> WindowsResult<()> {
     // Patch DLFixedVector container limited to 48 FMod soundbanks:
     patch_helper.patch_soundbank_limit()?;
 
+    // Patch arbitrary 255 `EnemyGeneratorCtrl` limit:
+    patch_helper.set_u32(0x40e7d8 + 2, 0)?;
+
     Ok(())
 }
 
