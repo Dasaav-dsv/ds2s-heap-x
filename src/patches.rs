@@ -82,6 +82,9 @@ pub fn place_all(config: &Config) -> WindowsResult<()> {
     // Patch DLFixedVector container limited to 48 FMod soundbanks:
     patch_helper.patch_soundbank_limit()?;
 
+    // Patch map destructor stack limit from 256 enemies:
+    patch_helper.patch_map_dtor_stack()?;
+
     // Patch arbitrary 255 `EnemyGeneratorCtrl` limit:
     patch_helper.set_u32(0x40e7d8 + 2, 0)?;
 
@@ -112,6 +115,18 @@ impl<'a> PatchHelper<'a> {
             let ptr = (self.base_addr + offset) as *mut u32;
 
             ptr.write_unaligned(val);
+        }
+
+        Ok(())
+    }
+
+    fn add_u32(&mut self, offset: usize, val: u32) -> WindowsResult<()> {
+        Self::set_rwe_memory_u32(self.base_addr + offset)?;
+
+        unsafe {
+            let ptr = (self.base_addr + offset) as *mut u32;
+
+            ptr.write_unaligned(ptr.read_unaligned().saturating_add(val));
         }
 
         Ok(())
@@ -374,6 +389,37 @@ impl<'a> PatchHelper<'a> {
         self.set_u32(0xb58654 + 3, DLFIXEDVECTOR_SIZE_OFFSET)?;
         self.set_u32(0xb5865e, 0xF9909090)?;
         self.set_u32(0xb58667 + 3, DLFIXEDVECTOR_SIZE_OFFSET)?;
+
+        Ok(())
+    }
+
+    fn patch_map_dtor_stack(&mut self) -> WindowsResult<()> {
+        // A stack allocated array at DarkSoulsII.exe+0x40db30
+        // has a fixed size of 256 and no bounds checking, allocated on the stack.
+        // This leads to a stack overflow and a crash when a map with more than 256
+        // enemies is deloaded and destroyed.
+
+        const STACK_ELEMENT_SIZE: u32 = 0x34;
+        const ARRAY_OLD_CAPACITY: u32 = STACK_ELEMENT_SIZE * 256;
+
+        // A maximum of 1024 enemies per map.
+        const ARRAY_NEW_CAPACITY: u32 = ARRAY_OLD_CAPACITY * 4;
+
+        // How many bytes to increase the size of the stack by.
+        const STACK_GROWTH: u32 = ARRAY_NEW_CAPACITY - ARRAY_OLD_CAPACITY;
+
+        // DarkSoulsII.exe+0x40db30:
+        self.add_u32(0x40db34 + 1, STACK_GROWTH)?;
+        self.add_u32(0x40db4b + 4, STACK_GROWTH)?;
+        self.add_u32(0x40db8e + 4, STACK_GROWTH)?;
+        self.add_u32(0x40dba9 + 2, STACK_GROWTH)?;
+        self.add_u32(0x40dc07 + 4, STACK_GROWTH)?;
+        self.add_u32(0x40dc18 + 4, STACK_GROWTH)?;
+        self.add_u32(0x40dc26 + 4, STACK_GROWTH)?;
+        self.add_u32(0x40dc5c + 4, STACK_GROWTH)?;
+        self.add_u32(0x40dc64 + 4, STACK_GROWTH)?;
+        self.add_u32(0x40dc82 + 4, STACK_GROWTH)?;
+        self.add_u32(0x40dc92 + 3, STACK_GROWTH)?;
 
         Ok(())
     }
